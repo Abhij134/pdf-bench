@@ -1,0 +1,57 @@
+"""
+workers/engines/marker_engine.py
+Layout-aware open-source OCR using Marker.
+Used when: empty_extraction or whitespace_anomaly AND GPU is available.
+Marker combines PDF parsing, layout detection, OCR, and table reconstruction.
+
+Requires: pip install marker-pdf torch (see requirements-gpu.txt)
+GPU: g4dn.xlarge (~$0.53/hr on AWS) processes ~22 pages/min.
+If no GPU is available, this engine raises ImportError and the router
+falls back to OCRmyPDF instead.
+"""
+import traceback
+from .base import BaseEngine, Engine, EngineOutput
+
+
+class MarkerEngine(BaseEngine):
+
+    @property
+    def engine_id(self) -> Engine:
+        return Engine.MARKER
+
+    def extract(self, pdf_path: str) -> EngineOutput:
+        """
+        Run Marker on a PDF. Returns full markdown output.
+        Marker's convert_single_pdf returns (markdown_str, images_dict, metadata_dict).
+        """
+        try:
+            # These imports fail if marker-pdf is not installed → handled by router
+            from marker.convert import convert_single_pdf
+            from marker.models import load_all_models
+
+            models = load_all_models()
+            full_markdown, _images, metadata = convert_single_pdf(pdf_path, models)
+
+            return EngineOutput(
+                raw_text=full_markdown,  # Markdown is used as plain text downstream
+                raw_markdown=full_markdown,
+                raw_json={"metadata": metadata},
+                extraction_confidence=0.87,
+                cost_usd=0.0,  # Self-hosted; compute cost only
+            )
+
+        except ImportError:
+            return EngineOutput(
+                raw_text="",
+                error_message=(
+                    "marker-pdf not installed. "
+                    "Run: pip install marker-pdf torch (see requirements-gpu.txt). "
+                    "Ensure CUDA is available."
+                ),
+            )
+        except Exception as exc:
+            return EngineOutput(
+                raw_text="",
+                error_message=str(exc),
+                stack_trace=traceback.format_exc(),
+            )

@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────────────────
+
+enum PDFType {
+  NATIVE_DIGITAL
+  SCANNED_IMAGE
+  HYBRID
+  VECTOR_TEXT
+  ENCRYPTED
+  CORRUPTED
+}
+
+enum LayoutType {
+  SINGLE_COLUMN
+  TWO_COLUMN
+  THREE_COLUMN
+  SIDEBAR_LEFT
+  SIDEBAR_RIGHT
+  MIXED
+  UNKNOWN
+}
+
+enum ExtractionEngine {
+  PYMUPDF
+  PDFMINER
+  PDFPLUMBER
+  MARKER
+  OCRMYPDF_TESSERACT
+  MISTRAL_OCR
+  GOOGLE_DOCUMENT_AI
+  AMAZON_TEXTRACT
+  AZURE_DOCUMENT_INTELLIGENCE
+  ADOBE_PDF_EXTRACT
+  LLAMAPARSE
+  UNSTRUCTURED
+}
+
+enum ExtractionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+// ─── DOCUMENT ───────────────────────────────────────────────────────
+
+model Document {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  filename              String
+  sha256Hash            String   @unique
+  fileSizeBytes         Int
+  pageCount             Int?
+
+  pdfType               PDFType?
+  layoutType            LayoutType?
+  hasTextLayer          Boolean?
+  hasFontEmbeds         Boolean?
+  hasImages             Boolean?
+  isEncrypted           Boolean  @default(false)
+  hasInvisibleText      Boolean  @default(false)
+  hasDuplicateLayers    Boolean  @default(false)
+  numericDensity        Float?
+
+  originalStoragePath    String
+  groundTruthStoragePath String?
+
+  edgeCaseTags          String[]
+  stratumId             String?
+  sourceSystem          String?
+
+  groundTruth           GroundTruth?
+  extractionResults     ExtractionResult[]
+  benchmarkRuns         BenchmarkRun[]
+
+  @@index([pdfType, layoutType])
+  @@index([sha256Hash])
+  @@index([stratumId])
+}
+
+// ─── GROUND TRUTH ───────────────────────────────────────────────────
+
+model GroundTruth {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documentId String   @unique
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  rawText              String
+  sectionsJson         Json?
+  numericEntities      Json?
+
+  derivationMethod     String
+  vlmSimilarityScore   Float?
+  validatedBy          String?
+  validatedAt          DateTime?
+  reviewNotes          String?
+
+  @@index([documentId])
+}
+
+// ─── EXTRACTION RESULT ──────────────────────────────────────────────
+
+model ExtractionResult {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  engine        ExtractionEngine
+  engineVersion String?
+  status        ExtractionStatus @default(PENDING)
+
+  rawText               String?
+  rawMarkdown           String?
+  rawJson               Json?
+
+  processingTimeMs      Int?
+  charCount             Int?
+  wordCount             Int?
+  pageCount             Int?
+
+  extractionConfidence     Float?
+  garbleRatio              Float?
+  whitespaceRatio          Float?
+  duplicateBlockRatio      Float?
+  numericAnomalyDetected   Boolean @default(false)
+  wasFallback              Boolean @default(false)
+
+  costUsd      Float?
+  apiCallCount Int?
+
+  errorMessage String?
+  stackTrace   String?
+
+  metrics BenchmarkMetric[]
+
+  @@unique([documentId, engine])
+  @@index([documentId])
+  @@index([engine, status])
+  @@index([extractionConfidence])
+}
+
+// ─── BENCHMARK RUN ──────────────────────────────────────────────────
+
+model BenchmarkRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  runLabel        String?
+  enginesIncluded ExtractionEngine[]
+
+  metrics BenchmarkMetric[]
+
+  @@index([documentId])
+}
+
+// ─── BENCHMARK METRIC ───────────────────────────────────────────────
+
+model BenchmarkMetric {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  benchmarkRunId     String
+  benchmarkRun       BenchmarkRun     @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
+
+  extractionResultId String
+  extractionResult   ExtractionResult @relation(fields: [extractionResultId], references: [id], onDelete: Cascade)
+
+  engine ExtractionEngine
+
+  // Text fidelity
+  cer           Float?
+  wer           Float?
+  charPrecision Float?
+  charRecall    Float?
+  charF1        Float?
+
+  // Reading order
+  readingOrderScore     Float?
+  blockCount            Int?
+  misorientedBlockCount Int?
+
+  // Numeric / factual accuracy
+  numericAccuracyAggregate Float?
+  phoneAccuracy            Float?
+  dateAccuracy             Float?
+  emailAccuracy            Float?
+  urlAccuracy              Float?
+  percentageAccuracy       Float?
+  salaryAccuracy           Float?
+  versionAccuracy          Float?
+
+  // Structural
+  sectionRecall    Float?
+  sectionPrecision Float?
+  sectionF1        Float?
+  tableAccuracy    Float?
+
+  // Noise & duplication
+  noiseRate       Float?
+  duplicationRate Float?
+
+  // Performance
+  latencyMs Int?
+  costUsd   Float?
+
+  // Composite
+  compositeScore Float?
+
+  @@index([benchmarkRunId])
+  @@index([engine])
+  @@index([compositeScore])
+}
