@@ -32,10 +32,12 @@ import traceback
 import os
 from difflib import SequenceMatcher
 from pathlib import Path
-
+from google import genai
 import fitz
 import psycopg2
-from anthropic import Anthropic
+from google.genai import types
+from dotenv import load_dotenv
+load_dotenv()
 
 DIVERGENCE_THRESHOLD = 0.15   # Flag for human review if similarity < 0.85
 VLM_MODEL = "deepseek-v4-flash"
@@ -61,18 +63,32 @@ def render_page_to_b64_png(page: fitz.Page, scale: float = VLM_PAGE_SCALE) -> st
     png_bytes = pix.tobytes("png")
     return base64.standard_b64encode(png_bytes).decode("utf-8")
 
-
-def extract_vlm_text(pdf_path: str, client: Anthropic) -> str:
-    """
-    Extract text from all pages using Claude Vision.
-    Explicit prompt enforces:
-      - Left-column-first ordering for multi-column layouts
-      - Verbatim transcription (no paraphrasing)
-      - Preservation of all numbers, dates, and punctuation
-    """
+def extract_vlm_text(pdf_path: str, client: genai.Client) -> str:
     doc = fitz.open(pdf_path)
     page_outputs = []
 
+    for page_num, page in enumerate(doc, start=1):
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        
+        response = client.models.generate_content(
+    model="gemini-3.6-flash",
+    contents=[
+        "Transcribe ALL text from this resume page exactly as it appears. Rules: "
+        "(1) Preserve reading order: left-column top-to-bottom FIRST, then right-column. "
+        "(2) Never paraphrase. (3) Preserve ALL numbers, dates, percentages, and punctuation verbatim. "
+        "(4) Separate distinct sections with a blank line. (5) Output ONLY the transcribed text.",
+        types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+    ]
+)
+        page_text = response.text
+        page_outputs.append(f"=== PAGE {page_num} ===\n{page_text}")
+        
+        import time
+        time.sleep(4.5) 
+
+    doc.close()
+    return "\n\n".join(page_outputs)
     for page_num, page in enumerate(doc, start=1):
         img_b64 = render_page_to_b64_png(page)
         response = client.messages.create(
@@ -219,11 +235,7 @@ def main():
     args = parser.parse_args()
 
     conn = psycopg2.connect(args.db_url)
-    client = Anthropic(
-        base_url=os.environ.get("ANTHROPIC_BASE_URL", "https://co.agentrouter.org"),
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    )
-
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     try:
         print(f"[gt_pipeline] Starting VLM extraction for document {args.document_id}", flush=True)
         vlm_text = extract_vlm_text(args.pdf, client)
