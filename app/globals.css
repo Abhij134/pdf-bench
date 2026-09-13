@@ -134,7 +134,18 @@ select:focus { border-color: var(--accent); }
 }
 .btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 
+.btn-danger {
+  background: var(--surface2);
+  color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.btn-danger:hover:not(:disabled) {
+  background: #3c1212;
+  border-color: var(--red);
+}
+
 .btn-sm { padding: 5px 10px; font-size: 0.75rem; }
+
 
 /* ===== TABLES ===== */
 .table-wrap { overflow-x: auto; }

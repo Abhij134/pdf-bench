@@ -259,6 +259,30 @@ export default function HomePage() {
     }
   }
 
+  // ── Delete existing doc ─────────────────────────────────────────────────────
+
+  async function handleDeleteDocument(docId: string, filename: string) {
+    if (!confirm(`Are you sure you want to delete "${filename}"? This will permanently delete the document, storage files, and all associated benchmark results.`)) {
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' })
+      if (res.ok) {
+        if (selectedDocId === docId) {
+          setSelectedDocId('')
+          setRunResult(null)
+        }
+        await loadDocuments()
+      } else {
+        const data = await res.json()
+        alert(`⚠ Failed to delete document: ${data.error ?? 'Unknown error'}`)
+      }
+    } catch (err) {
+      alert('⚠ Network error while deleting document')
+    }
+  }
+
   // ── Results column analysis ─────────────────────────────────────────────────
 
   const compositeExtremes = runResult ? computeExtremes(runResult.metrics, 'compositeScore') : null
@@ -372,6 +396,13 @@ export default function HomePage() {
                               Build GT
                             </button>
                           )}
+                          <button
+                            id={`delete-doc-${doc.id}`}
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteDocument(doc.id, doc.filename)}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -381,6 +412,7 @@ export default function HomePage() {
             </div>
           )}
         </section>
+
 
         {/* ── 2. UPLOAD FORM ── */}
         <section className="card">

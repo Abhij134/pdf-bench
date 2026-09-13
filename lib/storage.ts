@@ -48,3 +48,28 @@ export function resolveLocalPath(key: string): string {
   }
   throw new Error('resolveLocalPath is only valid for local storage driver.')
 }
+
+/**
+ * Delete a file from storage by key.
+ * Best-effort: ignores missing file errors.
+ */
+export async function deleteFile(key: string): Promise<void> {
+  if (DRIVER === 'local') {
+    const fullPath = path.join(LOCAL_ROOT, key)
+    try {
+      await fs.promises.unlink(fullPath)
+      const parentDir = path.dirname(fullPath)
+      const remaining = await fs.promises.readdir(parentDir).catch(() => [])
+      if (remaining.length === 0) {
+        await fs.promises.rmdir(parentDir).catch(() => {})
+      }
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`[storage] Could not delete ${fullPath}:`, err.message)
+      }
+    }
+    return
+  }
+  throw new Error('S3 storage driver not yet implemented.')
+}
+
