@@ -208,7 +208,7 @@ def main():
         # Write the result to the database
         result_id = upsert_extraction_result(conn, args.document_id, output)
         print(
-            f"[ocr_workflow] ✓ Written ExtractionResult id={result_id} "
+            f"[ocr_workflow] [OK] Written ExtractionResult id={result_id} "
             f"status={'COMPLETED' if not output.error_message else 'FAILED'} "
             f"words={output.word_count} pages={output.page_count} "
             f"confidence={output.extraction_confidence} cost=${output.cost_usd:.4f}",

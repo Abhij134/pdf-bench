@@ -281,7 +281,7 @@ class MistralOCREngine(BaseEngine):
         cost = round(page_count * 0.001, 6)
 
         print(
-            f"[mistral_engine] ✓ OCR complete. pages={page_count} "
+            f"[mistral_engine] [OK] OCR complete. pages={page_count} "
             f"confidence={confidence} cost=${cost:.4f}",
             flush=True,
         )

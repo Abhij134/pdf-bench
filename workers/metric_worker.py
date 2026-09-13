@@ -183,7 +183,7 @@ def main():
                 )
             conn.commit()
             print(
-                f"[metric_worker] ✓ engine={engine} CER={cer_val:.4f} "
+                f"[metric_worker] [OK] engine={engine} CER={cer_val:.4f} "
                 f"WER={wer_val:.4f} RO={ro_score:.4f} composite={composite:.4f}",
                 flush=True,
             )

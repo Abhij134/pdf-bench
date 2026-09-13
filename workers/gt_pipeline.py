@@ -257,7 +257,7 @@ def main():
             numeric_entities=numeric_entities,
         )
 
-        print(f"[gt_pipeline] ✓ Ground truth written. id={gt_id} method={derivation}", flush=True)
+        print(f"[gt_pipeline] [OK] Ground truth written. id={gt_id} method={derivation}", flush=True)
         sys.exit(0)
 
     except Exception as exc:
