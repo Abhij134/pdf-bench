@@ -32,7 +32,7 @@ import time
 import traceback
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 
 from .base import BaseEngine, Engine, EngineOutput
 
@@ -95,7 +95,7 @@ class MistralOCREngine(BaseEngine):
 
         # Try SDK path first, fall back to raw requests
         try:
-            from mistralai.client import Mistral
+            from mistralai.client import Mistral  # type: ignore
             return self._extract_via_sdk(pdf_path, api_key)
         except ImportError:
             return self._extract_via_requests(pdf_path, api_key)
@@ -116,7 +116,7 @@ class MistralOCREngine(BaseEngine):
           3. Submit to the OCR endpoint.
           4. Collect and return page-level markdown.
         """
-        from mistralai.client import Mistral
+        from mistralai.client import Mistral  # type: ignore
 
         client = Mistral(api_key=api_key)
 

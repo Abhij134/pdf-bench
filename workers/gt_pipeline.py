@@ -37,7 +37,7 @@ import fitz
 import psycopg2
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv ()
+from dotenv import load_dotenv  # type: ignore
 
 
 # ─── CONFIGURATION ───────────────────────────────────────────────────
