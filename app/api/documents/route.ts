@@ -17,8 +17,10 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
+import { spawn } from 'child_process'
+import path from 'path'
 import { prisma } from '@/lib/prisma'
-import { saveFile } from '@/lib/storage'
+import { saveFile, resolveLocalPath } from '@/lib/storage'
 
 /**
  * GET /api/documents
@@ -98,10 +100,39 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    // Spawn pre-flight classifier in background — non-blocking.
+    // Classifies pdfType, layoutType, hasTextLayer, etc. and updates the DB row.
+    spawnPreflight(doc.id, resolveLocalPath(storageKey))
+
     return NextResponse.json({ id: doc.id, sha256Hash, filename: doc.filename }, { status: 201 })
 
   } catch (err) {
     console.error('[POST /api/documents]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
+}
+
+/**
+ * Spawn workers/preflight.py as a detached background process.
+ * Runs after the upload response is already sent — updates the Document row
+ * with pdfType, layoutType, and other classification signals.
+ */
+function spawnPreflight(documentId: string, pdfAbsPath: string): void {
+  const proc = spawn(
+    'python3',
+    [
+      path.join(process.cwd(), 'workers', 'preflight.py'),
+      '--document-id', documentId,
+      '--pdf',         pdfAbsPath,
+      '--db-url',      process.env.DATABASE_URL!,
+    ],
+    {
+      env: { ...process.env },
+      cwd: path.join(process.cwd(), 'workers'),
+      detached: true,
+      stdio: 'ignore',
+    }
+  )
+  proc.unref()  // Don't hold the Node.js event loop open
+  console.log(`[preflight] Spawned for document ${documentId}`)
 }

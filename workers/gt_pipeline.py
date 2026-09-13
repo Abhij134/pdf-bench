@@ -3,12 +3,12 @@ workers/gt_pipeline.py
 Semi-automated ground truth pipeline.
 
 Steps:
-  1. Render each PDF page to PNG at 3x scale (~216 DPI equivalent).
-  2. Send each page image to Claude via Anthropic API with strict ordering prompt.
+  1. Render each PDF page to PNG at 150 DPI.
+  2. Send each page image to Gemini with strict ordering prompt.
   3. Run PyMuPDF native extraction on the same PDF.
   4. Compute SequenceMatcher similarity between VLM and native outputs.
   5. If similarity >= (1 - DIVERGENCE_THRESHOLD): auto-accept VLM text as GT.
-  6. If similarity < threshold: save both versions; flag for human review.
+  6. If similarity < threshold: flag for human review.
   7. Extract numeric entities from the final GT text.
   8. Write GroundTruth row to PostgreSQL.
 
@@ -23,27 +23,33 @@ Usage:
     --db-url postgresql://...
 """
 import argparse
-import base64
-import hashlib
 import json
+import os
 import re
 import sys
+import time
 import traceback
-import os
+import uuid
 from difflib import SequenceMatcher
-from pathlib import Path
-from google import genai
+
+# pyrefly: ignore [missing-import]
 import fitz
 import psycopg2
+from google import genai
 from google.genai import types
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import load_dotenv ()
 
-DIVERGENCE_THRESHOLD = 0.15   # Flag for human review if similarity < 0.85
-VLM_MODEL = "deepseek-v4-flash"
-VLM_PAGE_SCALE = 3.0           # Scale factor for PNG rendering (3x ≈ 216 DPI)
 
-# Regex patterns for numeric entity extraction (mirrors metrics/numeric_accuracy.py)
+# ─── CONFIGURATION ───────────────────────────────────────────────────
+
+DIVERGENCE_THRESHOLD = 0.15    # Flag for human review if similarity < 0.85
+VLM_MODEL = "gemini-3.6-flash" # Must match an existing Gemini model name
+VLM_PAGE_DPI = 150             # DPI for page rendering sent to VLM         # DPI for page rendering sent to VLM
+RATE_LIMIT_SLEEP_SEC = 4.5     # Sleep between Gemini API calls (free tier limit)
+
+# ─── NUMERIC ENTITY PATTERNS ─────────────────────────────────────────
+# Mirrors workers/metrics/numeric_accuracy.py — keep in sync if patterns change.
+
 NUMERIC_PATTERNS = {
     "phones":      r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',
     "dates":       r'\b(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:19|20)\d{2})\b',
@@ -55,79 +61,50 @@ NUMERIC_PATTERNS = {
     "urls":        r'https?://[^\s<>"{}|\\^`\[\]]+',
 }
 
+VLM_PROMPT = (
+    "Transcribe ALL text from this resume page exactly as it appears. Rules: "
+    "(1) Preserve reading order: left-column top-to-bottom FIRST, "
+    "then right-column top-to-bottom. "
+    "(2) Never paraphrase, summarise, or omit any text. "
+    "(3) Preserve ALL numbers, dates, percentages, and punctuation verbatim — "
+    "do not normalise or reformat them. "
+    "(4) Separate visually distinct sections with a blank line. "
+    "(5) Output ONLY the transcribed text. "
+    "Do not add any commentary, labels, or explanations."
+)
 
-def render_page_to_b64_png(page: fitz.Page, scale: float = VLM_PAGE_SCALE) -> str:
-    """Render a PDF page to a base64-encoded PNG string."""
-    mat = fitz.Matrix(scale, scale)
-    pix = page.get_pixmap(matrix=mat)
-    png_bytes = pix.tobytes("png")
-    return base64.standard_b64encode(png_bytes).decode("utf-8")
+
+# ─── CORE FUNCTIONS ──────────────────────────────────────────────────
 
 def extract_vlm_text(pdf_path: str, client: genai.Client) -> str:
+    """
+    Extract text from all pages using Gemini Vision.
+    Renders each page as a PNG and sends it with a strict ordering prompt.
+    Sleeps RATE_LIMIT_SLEEP_SEC between pages to respect free-tier rate limits.
+    """
     doc = fitz.open(pdf_path)
     page_outputs = []
 
     for page_num, page in enumerate(doc, start=1):
-        pix = page.get_pixmap(dpi=150)
+        # Render page to PNG bytes at the configured DPI
+        pix = page.get_pixmap(dpi=VLM_PAGE_DPI)
         img_bytes = pix.tobytes("png")
-        
-        response = client.models.generate_content(
-    model="gemini-3.6-flash",
-    contents=[
-        "Transcribe ALL text from this resume page exactly as it appears. Rules: "
-        "(1) Preserve reading order: left-column top-to-bottom FIRST, then right-column. "
-        "(2) Never paraphrase. (3) Preserve ALL numbers, dates, percentages, and punctuation verbatim. "
-        "(4) Separate distinct sections with a blank line. (5) Output ONLY the transcribed text.",
-        types.Part.from_bytes(data=img_bytes, mime_type="image/png")
-    ]
-)
-        page_text = response.text
-        page_outputs.append(f"=== PAGE {page_num} ===\n{page_text}")
-        
-        import time
-        time.sleep(4.5) 
 
-    doc.close()
-    return "\n\n".join(page_outputs)
-    for page_num, page in enumerate(doc, start=1):
-        img_b64 = render_page_to_b64_png(page)
-        response = client.messages.create(
+        response = client.models.generate_content(
             model=VLM_MODEL,
-            max_tokens=4096,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": img_b64,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Transcribe ALL text from this resume page exactly as it appears. "
-                                "Rules: "
-                                "(1) Preserve reading order: left-column top-to-bottom FIRST, "
-                                "then right-column top-to-bottom. "
-                                "(2) Never paraphrase, summarise, or omit any text. "
-                                "(3) Preserve ALL numbers, dates, percentages, and punctuation verbatim — "
-                                "do not normalise or reformat them. "
-                                "(4) Separate visually distinct sections with a blank line. "
-                                "(5) Output ONLY the transcribed text. "
-                                "Do not add any commentary, labels, or explanations."
-                            ),
-                        },
-                    ],
-                }
+            contents=[
+                VLM_PROMPT,
+                types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
             ],
         )
-        page_text = response.content[0].text
+
+        page_text = response.text
         page_outputs.append(f"=== PAGE {page_num} ===\n{page_text}")
         print(f"  [gt_pipeline] VLM processed page {page_num}", flush=True)
+
+        # Rate limiting: sleep between pages to avoid 429 errors
+        if page_num < len(doc):
+            time.sleep(RATE_LIMIT_SLEEP_SEC)
 
     doc.close()
     return "\n\n".join(page_outputs)
@@ -136,10 +113,12 @@ def extract_vlm_text(pdf_path: str, client: genai.Client) -> str:
 def extract_native_text(pdf_path: str) -> str:
     """
     PyMuPDF native extraction with column-aware sort.
-    Used as cross-reference for similarity scoring — NOT as the GT itself.
+    Used only as a cross-reference for similarity scoring — NOT as the GT itself.
+    The VLM text is always the authoritative GT because it reads visual layout directly.
     """
     doc = fitz.open(pdf_path)
     pages = []
+
     for page in doc:
         raw = page.get_text(
             "dict",
@@ -152,7 +131,10 @@ def extract_native_text(pdf_path: str) -> str:
         multi_col = len(right_side) / max(len(blocks), 1) > 0.20
 
         if multi_col:
-            left = sorted([b for b in blocks if b["bbox"][0] < col_boundary], key=lambda b: b["bbox"][1])
+            left = sorted(
+                [b for b in blocks if b["bbox"][0] < col_boundary],
+                key=lambda b: b["bbox"][1],
+            )
             right = sorted(right_side, key=lambda b: b["bbox"][1])
             ordered = left + right
         else:
@@ -163,6 +145,7 @@ def extract_native_text(pdf_path: str) -> str:
             for b in ordered
         )
         pages.append(page_text)
+
     doc.close()
     return "\n\n".join(pages)
 
@@ -175,11 +158,13 @@ def compute_similarity(text_a: str, text_b: str) -> float:
 
 
 def extract_numeric_entities(text: str) -> dict:
-    """Extract named numeric entities for targeted validation in benchmarks."""
+    """
+    Extract named numeric entities from text for targeted validation in benchmarks.
+    Tuple matches (from capturing groups) are flattened to strings.
+    """
     result = {}
     for entity_type, pattern in NUMERIC_PATTERNS.items():
         matches = list(set(re.findall(pattern, text, re.IGNORECASE)))
-        # Flatten tuple matches (from groups in patterns like year_ranges)
         flat = [" ".join(m).strip() if isinstance(m, tuple) else m for m in matches]
         result[entity_type] = flat
     return result
@@ -193,8 +178,11 @@ def write_ground_truth(
     derivation_method: str,
     numeric_entities: dict,
 ) -> str:
-    """Upsert a GroundTruth row. Returns the created/updated row ID."""
-    import uuid
+    """
+    Upsert a GroundTruth row into PostgreSQL.
+    Uses ON CONFLICT so re-running the pipeline updates the existing row.
+    Returns the row ID.
+    """
     gt_id = str(uuid.uuid4())
     with conn.cursor() as cur:
         cur.execute(
@@ -226,16 +214,19 @@ def write_ground_truth(
     return returned_id
 
 
+# ─── ENTRY POINT ─────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(description="Ground truth pipeline")
-    parser.add_argument("--document-id", required=True)
-    parser.add_argument("--pdf",         required=True)
-    parser.add_argument("--stratum-id",  required=True)
-    parser.add_argument("--db-url",      required=True)
+    parser.add_argument("--document-id", required=True, help="Document row ID from the DB")
+    parser.add_argument("--pdf",         required=True, help="Absolute path to the PDF file")
+    parser.add_argument("--stratum-id",  required=True, help="Sourcing matrix stratum ID")
+    parser.add_argument("--db-url",      required=True, help="PostgreSQL connection string")
     args = parser.parse_args()
 
     conn = psycopg2.connect(args.db_url)
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
     try:
         print(f"[gt_pipeline] Starting VLM extraction for document {args.document_id}", flush=True)
         vlm_text = extract_vlm_text(args.pdf, client)
@@ -251,8 +242,8 @@ def main():
         else:
             derivation = "vlm_pending_human_review"
             print(
-                f"[gt_pipeline] ⚠ Similarity {similarity} < {1 - DIVERGENCE_THRESHOLD:.2f}. "
-                "Flagged for human review in Label Studio.",
+                f"[gt_pipeline] ⚠ Similarity {similarity:.4f} < "
+                f"{1.0 - DIVERGENCE_THRESHOLD:.2f}. Flagged for human review.",
                 flush=True,
             )
 

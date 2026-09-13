@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -284,11 +285,14 @@ export default function HomePage() {
     <>
       {/* ── HEADER ── */}
       <header>
-        <div className="container inner">
+        <div className="container inner" style={{ justifyContent: 'space-between' }}>
           <div>
             <h1>PDF-Bench</h1>
             <div className="subtitle">PDF Text Extraction Benchmarking System</div>
           </div>
+          <Link href="/review" id="review-queue-link" className="btn btn-secondary btn-sm">
+            ✎ GT Review Queue
+          </Link>
         </div>
       </header>
 
