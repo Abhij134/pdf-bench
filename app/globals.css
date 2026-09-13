@@ -144,7 +144,19 @@ select:focus { border-color: var(--accent); }
   border-color: var(--red);
 }
 
+.btn-ocr {
+  background: var(--surface2);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+}
+.btn-ocr:hover:not(:disabled) {
+  background: #0c2233;
+  border-color: #22d3ee;
+}
+.btn-ocr:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .btn-sm { padding: 5px 10px; font-size: 0.75rem; }
+
 
 
 /* ===== TABLES ===== */

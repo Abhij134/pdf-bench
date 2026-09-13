@@ -125,6 +125,12 @@ export default function HomePage() {
   const [runStatus, setRunStatus] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<BenchmarkRunResult | null>(null)
 
+  // OCR quick-action state
+  const [ocrDocId, setOcrDocId] = useState<string | null>(null)      // which doc is being OCR'd
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null)    // status message
+  const [ocrText, setOcrText] = useState<string | null>(null)        // extracted text to display
+  const [ocrFilename, setOcrFilename] = useState<string>('')
+
   // Load documents on mount
   const loadDocuments = useCallback(async () => {
     try {
@@ -273,6 +279,11 @@ export default function HomePage() {
           setSelectedDocId('')
           setRunResult(null)
         }
+        if (ocrDocId === docId) {
+          setOcrDocId(null)
+          setOcrText(null)
+          setOcrStatus(null)
+        }
         await loadDocuments()
       } else {
         const data = await res.json()
@@ -280,6 +291,76 @@ export default function HomePage() {
       }
     } catch (err) {
       alert('⚠ Network error while deleting document')
+    }
+  }
+
+  // ── Run Mistral OCR on a single document ────────────────────────────────────
+
+  async function handleRunOCR(docId: string, filename: string) {
+    setOcrDocId(docId)
+    setOcrFilename(filename)
+    setOcrText(null)
+    setOcrStatus('info:🔍 Sending to Mistral OCR… this may take 30–90 seconds.')
+
+    try {
+      const res = await fetch('/api/ocr/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: docId }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        setOcrStatus(`error:OCR trigger failed: ${data.error ?? 'Unknown error'}`)
+        return
+      }
+
+      setOcrStatus('info:⏳ OCR is running in the background. Polling for result…')
+
+      // Poll GET /api/documents/:id for the MISTRAL_OCR ExtractionResult (max 90s)
+      for (let attempt = 0; attempt < 18; attempt++) {
+        await new Promise(r => setTimeout(r, 5000))
+        const docRes = await fetch(`/api/documents/${docId}`)
+        if (!docRes.ok) continue
+        const docData = await docRes.json()
+        const ocrResult = docData.extractionResults?.find(
+          (r: any) => r.engine === 'MISTRAL_OCR' && r.status === 'COMPLETED'
+        )
+        if (ocrResult) {
+          // Fetch full rawText from a second call (extractionResults only has summary fields)
+          setOcrStatus(`success:✓ OCR complete! Confidence: ${ocrResult.extractionConfidence?.toFixed(3) ?? '—'}`)
+          // Load full text by re-querying the extraction result
+          await loadOCRText(docId)
+          await loadDocuments()
+          return
+        }
+        const failedResult = docData.extractionResults?.find(
+          (r: any) => r.engine === 'MISTRAL_OCR' && r.status === 'FAILED'
+        )
+        if (failedResult) {
+          setOcrStatus('error:OCR failed. Check server logs for details.')
+          return
+        }
+      }
+      setOcrStatus('info:OCR is still running — refresh results in a moment.')
+    } catch (err) {
+      setOcrStatus('error:Network error while running OCR.')
+    }
+  }
+
+  // ── Load the OCR text from the last ExtractionResult ────────────────────────
+
+  async function loadOCRText(docId: string) {
+    try {
+      const res = await fetch(`/api/ocr/${docId}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.status === 'COMPLETED') {
+        const text = data.rawMarkdown || data.rawText || '(empty response)'
+        setOcrText(text)
+      }
+    } catch (err) {
+      console.error('Failed to load OCR text', err)
     }
   }
 
@@ -396,6 +477,14 @@ export default function HomePage() {
                               Build GT
                             </button>
                           )}
+                          <button
+                            id={`ocr-doc-${doc.id}`}
+                            className="btn btn-ocr btn-sm"
+                            disabled={ocrDocId === doc.id && ocrStatus?.startsWith('info')}
+                            onClick={() => handleRunOCR(doc.id, doc.filename)}
+                          >
+                            {ocrDocId === doc.id && ocrStatus?.startsWith('info') ? '⏳ OCR…' : '🔍 OCR'}
+                          </button>
                           <button
                             id={`delete-doc-${doc.id}`}
                             className="btn btn-danger btn-sm"
@@ -616,6 +705,63 @@ export default function HomePage() {
                 </div>
               </div>
             )}
+          </section>
+        )}
+
+        {/* ── 5. OCR STATUS / RESULT VIEWER ── */}
+        {ocrDocId && ocrStatus && (
+          <section className="card">
+            <div className="card-title">
+              🔍 Mistral OCR
+              <span className="badge">{ocrFilename}</span>
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => { setOcrDocId(null); setOcrStatus(null); setOcrText(null) }}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Status message */}
+            {ocrStatus && (
+              <div className={`alert ${ocrStatus.startsWith('error') ? 'alert-error' : ocrStatus.startsWith('success') ? 'alert-success' : 'alert-info'}`}>
+                {ocrStatus.replace(/^(error|success|info):/, '')}
+              </div>
+            )}
+
+            {/* OCR output text viewer */}
+            {ocrText && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: 8 }}>
+                  Extracted text (Markdown format) — {ocrText.length.toLocaleString()} chars
+                </div>
+                <textarea
+                  readOnly
+                  value={ocrText}
+                  rows={20}
+                  style={{
+                    width: '100%',
+                    background: 'var(--surface2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius)',
+                    color: 'var(--text)',
+                    fontSize: '0.78rem',
+                    fontFamily: 'monospace',
+                    padding: '12px',
+                    resize: 'vertical',
+                    outline: 'none',
+                    lineHeight: 1.6,
+                  }}
+                />
+              </div>
+            )}
+
+            {/* How-to hint */}
+            <div style={{ marginTop: 12, fontSize: '0.72rem', color: 'var(--muted)' }}>
+              The full extracted text is stored in the <code>ExtractionResult</code> database row (engine=MISTRAL_OCR).
+              To include this in a full benchmark comparison, select the document above and include MISTRAL_OCR in the engine list.
+            </div>
           </section>
         )}
 
