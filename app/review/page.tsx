@@ -96,19 +96,17 @@ export default function ReviewPage() {
 
   return (
     <>
-      <header>
-        <div className="container inner" style={{ justifyContent: 'space-between' }}>
-          <div>
-            <h1>PDF-Bench</h1>
-            <div className="subtitle">Ground Truth Review Queue</div>
-          </div>
-          <Link href="/" className="btn btn-secondary btn-sm">← Back to Dashboard</Link>
+
+
+      <main className="container" style={{ paddingTop: 32 }}>
+        <div style={{ marginBottom: '24px' }}>
+          <Link href="/" style={{ color: 'var(--blue)', textDecoration: 'none', fontSize: '0.95rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            ← Back to Dashboard
+          </Link>
         </div>
-      </header>
 
-      <main className="container" style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 24, alignItems: 'start', paddingTop: 32 }}>
-
-        {/* ── LEFT: Pending list ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 24, alignItems: 'start' }}>
+          {/* ── LEFT: Pending list ── */}
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-title" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', marginBottom: 0 }}>
             ⏳ Pending Review
@@ -271,6 +269,7 @@ export default function ReviewPage() {
           )}
         </section>
 
+        </div>
       </main>
     </>
   )

@@ -30,17 +30,11 @@ def compute_cer(hypothesis: str, reference: str) -> float:
     Character Error Rate.
     Returns 0.0 for a perfect match. Can exceed 1.0 for heavy corruption.
     """
-    if not reference.strip():
+    hyp = TEXT_NORMALISE(hypothesis)
+    ref = TEXT_NORMALISE(reference)
+    if not ref.strip():
         return 1.0  # No reference = maximum error
-    return round(
-        jiwer_cer(
-            reference,
-            hypothesis,
-            reference_transform=TEXT_NORMALISE,
-            hypothesis_transform=TEXT_NORMALISE,
-        ),
-        6,
-    )
+    return round(jiwer_cer(ref, hyp), 6)
 
 
 def compute_wer(hypothesis: str, reference: str) -> float:
@@ -48,17 +42,11 @@ def compute_wer(hypothesis: str, reference: str) -> float:
     Word Error Rate.
     Returns 0.0 for a perfect match. Can exceed 1.0 for heavy corruption.
     """
-    if not reference.strip():
+    hyp = TEXT_NORMALISE(hypothesis)
+    ref = TEXT_NORMALISE(reference)
+    if not ref.strip():
         return 1.0
-    return round(
-        jiwer_wer(
-            reference,
-            hypothesis,
-            reference_transform=TEXT_NORMALISE,
-            hypothesis_transform=TEXT_NORMALISE,
-        ),
-        6,
-    )
+    return round(jiwer_wer(ref, hyp), 6)
 
 
 def compute_char_f1(hypothesis: str, reference: str) -> dict:

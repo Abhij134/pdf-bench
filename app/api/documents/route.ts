@@ -22,6 +22,10 @@ import path from 'path'
 import { prisma } from '@/lib/prisma'
 import { saveFile, resolveLocalPath } from '@/lib/storage'
 
+import fs from 'fs'
+const _localVenv = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe')
+const PYTHON_CMD = fs.existsSync(_localVenv) ? _localVenv : (process.platform === 'win32' ? 'python' : 'python3')
+
 /**
  * GET /api/documents
  * List all registered documents with ground truth status.
@@ -112,27 +116,30 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/**
- * Spawn workers/preflight.py as a detached background process.
- * Runs after the upload response is already sent — updates the Document row
- * with pdfType, layoutType, and other classification signals.
- */
 function spawnPreflight(documentId: string, pdfAbsPath: string): void {
   const proc = spawn(
-    'python3',
+    PYTHON_CMD,
     [
-      path.join(process.cwd(), 'workers', 'preflight.py'),
+      'preflight.py',
       '--document-id', documentId,
       '--pdf',         pdfAbsPath,
       '--db-url',      process.env.DATABASE_URL!,
     ],
     {
-      env: { ...process.env },
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
       cwd: path.join(process.cwd(), 'workers'),
-      detached: true,
-      stdio: 'ignore',
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
     }
   )
+
+  proc.stdout?.on('data', (d: Buffer) => console.log(`[preflight]`, d.toString().trim()))
+  proc.stderr?.on('data', (d: Buffer) => console.error(`[preflight]`, d.toString().trim()))
+
+  proc.on('error', (err) => {
+    console.error(`[preflight] Failed to spawn for document ${documentId}:`, err)
+  })
+
   proc.unref()  // Don't hold the Node.js event loop open
   console.log(`[preflight] Spawned for document ${documentId}`)
 }

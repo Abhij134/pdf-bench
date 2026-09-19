@@ -27,6 +27,9 @@ succeeded; missing preflight data is acceptable, just not ideal).
 import argparse
 import re
 import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import traceback
 
 import fitz  # pymupdf

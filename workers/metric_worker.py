@@ -16,6 +16,9 @@ Usage:
 import argparse
 import json
 import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import traceback
 import uuid
 from collections import Counter
@@ -48,6 +51,7 @@ def main():
                 WHERE br.id = %s
                   AND er.status = 'COMPLETED'
                   AND er."rawText" IS NOT NULL
+                  AND NULLIF(BTRIM(er."rawText"), '') IS NOT NULL
                 """,
                 (args.benchmark_run_id,),
             )

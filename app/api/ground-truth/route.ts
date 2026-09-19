@@ -16,6 +16,10 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { resolveLocalPath } from '@/lib/storage'
 
+import fs from 'fs'
+const _localVenv = path.join(process.cwd(), '..', '.venv', 'Scripts', 'python.exe')
+const PYTHON_CMD = fs.existsSync(_localVenv) ? _localVenv : (process.platform === 'win32' ? 'python' : 'python3')
+
 const RequestSchema = z.object({ documentId: z.string().min(1) })
 
 export async function POST(req: NextRequest) {
@@ -29,19 +33,20 @@ export async function POST(req: NextRequest) {
     const pdfAbsPath = resolveLocalPath(doc.originalStoragePath)
 
     const proc = spawn(
-      'python3',
+      PYTHON_CMD,
       [
-        path.join(process.cwd(), 'workers', 'gt_pipeline.py'),
+        'gt_pipeline.py',
         '--document-id', doc.id,
         '--pdf',         pdfAbsPath,
         '--stratum-id',  doc.stratumId ?? 'UNKNOWN',
         '--db-url',      process.env.DATABASE_URL!,
       ],
       {
-        env: { ...process.env },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         detached: true,   // Allow process to outlive the request
         stdio: 'ignore',  // Don't buffer stdio in Next.js process
         cwd: path.join(process.cwd(), 'workers'),
+        windowsHide: true,
       }
     )
     proc.unref()  // Let Node.js exit without waiting for this process

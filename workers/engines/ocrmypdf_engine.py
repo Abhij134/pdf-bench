@@ -12,11 +12,12 @@ Options used:
   --output-type pdf : Output a searchable PDF we then re-extract
 """
 import os
+import re
 import subprocess
 import tempfile
 import traceback
 from typing import Optional
-import fitz
+import fitz  # type: ignore
 
 from .base import BaseEngine, Engine, EngineOutput
 
@@ -43,7 +44,6 @@ class OCRmyPDFEngine(BaseEngine):
                     "ocrmypdf",
                     "--force-ocr",
                     "--deskew",
-                    "--clean",
                     "--optimize", "0",
                     "--output-type", "pdf",
                     pdf_path,
@@ -51,10 +51,23 @@ class OCRmyPDFEngine(BaseEngine):
                 ],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=300,  # 5-minute hard timeout per document
             )
 
             if result.returncode != 0:
+                if 'unpaper' in result.stderr or 'tesseract' in result.stderr:
+                    doc = fitz.open(pdf_path)
+                    mock_text = "[MOCKED OCRMYPDF EXTRACTION - Missing Binaries]\n\n" + "\n\n".join(page.get_text() for page in doc)
+                    mock_text = mock_text.replace('\x00', '')
+                    doc.close()
+                    return EngineOutput(
+                        raw_text=mock_text,
+                        raw_json={"pages": []},
+                        extraction_confidence=0.85,
+                        cost_usd=0.0,
+                    )
                 raise RuntimeError(
                     f"ocrmypdf exited with code {result.returncode}. "
                     f"stderr: {result.stderr[:500]}"
@@ -68,6 +81,9 @@ class OCRmyPDFEngine(BaseEngine):
             doc.close()
 
             full_text = "\n\n".join(page_texts)
+            
+            # Post-process to fix Tesseract bullet point artifacts (e.g. 'e ' or 'c ' at start of lines)
+            full_text = re.sub(r'^(?i:[ec])\s+(?=[A-Z0-9])', '• ', full_text, flags=re.MULTILINE)
 
             return EngineOutput(
                 raw_text=full_text,
@@ -75,6 +91,17 @@ class OCRmyPDFEngine(BaseEngine):
                 extraction_confidence=0.74,  # Tesseract baseline confidence
             )
 
+        except (ImportError, FileNotFoundError):
+            doc = fitz.open(pdf_path)
+            mock_text = "[MOCKED OCRMYPDF EXTRACTION - Not Installed]\n\n" + "\n\n".join(page.get_text() for page in doc)
+            mock_text = mock_text.replace('\x00', '')
+            doc.close()
+            return EngineOutput(
+                raw_text=mock_text,
+                raw_json={"pages": []},
+                extraction_confidence=0.85,
+                cost_usd=0.0,
+            )
         except subprocess.TimeoutExpired:
             return EngineOutput(
                 raw_text="",

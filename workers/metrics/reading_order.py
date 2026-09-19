@@ -13,6 +13,7 @@ Two reading-order accuracy methods:
 Use NED as the primary metric stored in BenchmarkMetric.readingOrderScore.
 Report Kendall τ in analysis / reporting layer.
 """
+import re
 from difflib import SequenceMatcher
 from typing import List, Tuple
 
@@ -30,15 +31,26 @@ ALIGNMENT_THRESHOLD = 0.55
 BLOCK_COMPARE_CHARS = 300
 
 
+BLANK_LINE_RE = re.compile(r"\n\s*\n")
+
 def segment_into_blocks(text: str) -> List[str]:
     """
-    Split text into blocks on double-newline boundaries.
-    Filters out very short fragments that would produce noisy alignments.
+    Split text into blocks. Primary: blank-line (paragraph) boundaries.
+    Fallback: line-level blocks, for engines that emit single newlines
+    (e.g. PyMuPDF page dict output) and would otherwise produce one
+    giant block that defeats alignment.
     """
+    blocks = [
+        b.strip()
+        for b in BLANK_LINE_RE.split(text)
+        if len(b.strip()) >= MIN_BLOCK_CHARS
+    ]
+    if len(blocks) >= 2:
+        return blocks
     return [
-        block.strip()
-        for block in text.split("\n\n")
-        if len(block.strip()) >= MIN_BLOCK_CHARS
+        ln.strip()
+        for ln in text.split("\n")
+        if len(ln.strip()) >= MIN_BLOCK_CHARS
     ]
 
 

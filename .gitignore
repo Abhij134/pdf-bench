@@ -6,3 +6,10 @@ storage/
 __pycache__/
 *.pyc
 .prisma/
+.venv/
+.progress/
+*.json
+*.js
+!package.json
+!package-lock.json
+!tsconfig.json

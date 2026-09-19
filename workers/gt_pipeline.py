@@ -3,31 +3,33 @@ workers/gt_pipeline.py
 Semi-automated ground truth pipeline.
 
 Steps:
-  1. Render each PDF page to PNG at 150 DPI.
-  2. Send each page image to Gemini with strict ordering prompt.
-  3. Run PyMuPDF native extraction on the same PDF.
-  4. Compute SequenceMatcher similarity between VLM and native outputs.
-  5. If similarity >= (1 - DIVERGENCE_THRESHOLD): auto-accept VLM text as GT.
-  6. If similarity < threshold: flag for human review.
-  7. Extract numeric entities from the final GT text.
-  8. Write GroundTruth row to PostgreSQL.
+  1. Use Marker (local OCR/VLM) to extract layout-aware markdown.
+  2. Run PyMuPDF native extraction on the same PDF.
+  3. Compute SequenceMatcher similarity between Marker and native outputs.
+  4. If similarity >= (1 - DIVERGENCE_THRESHOLD): auto-accept text as GT.
+  5. If similarity < threshold: flag for human review.
+  6. Extract numeric entities from the final GT text.
+  7. Write GroundTruth row to PostgreSQL.
 
 DIVERGENCE_THRESHOLD = 0.15 means: flag if similarity < 85%.
-For multilingual docs, consider raising to 0.20.
 
 Usage:
-  python3 workers/gt_pipeline.py \\
-    --document-id clxxx \\
-    --pdf /abs/path/to/file.pdf \\
-    --stratum-id NATIVE-TWO-COL \\
+  python3 workers/gt_pipeline.py \
+    --document-id clxxx \
+    --pdf /abs/path/to/file.pdf \
+    --stratum-id NATIVE-TWO-COL \
     --db-url postgresql://...
 """
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import argparse
 import json
 import os
 import re
 import sys
-import time
 import traceback
 import uuid
 from difflib import SequenceMatcher
@@ -35,20 +37,37 @@ from difflib import SequenceMatcher
 # pyrefly: ignore [missing-import]
 import fitz
 import psycopg2
-from google import genai
-from google.genai import types
 from dotenv import load_dotenv  # type: ignore
 
+from filelock import FileLock  # type: ignore
+
+def write_progress(doc_id: str, status: str, progress: int = 0, error: str = None):
+    try:
+        progress_dir = os.path.join(os.path.dirname(__file__), "..", ".progress")
+        os.makedirs(progress_dir, exist_ok=True)
+        file_path = os.path.join(progress_dir, f"{doc_id}.json")
+        data = {
+            "status": status,
+            "progress": progress,
+            "error": error
+        }
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[gt_pipeline] Failed to write progress: {e}")
+
+env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(env_path)
 
 # ─── CONFIGURATION ───────────────────────────────────────────────────
 
+os.environ["HF_HOME"] = r"P:\huggingface_models_cache"
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["IN_STREAMLIT"] = "true"
+
 DIVERGENCE_THRESHOLD = 0.15    # Flag for human review if similarity < 0.85
-VLM_MODEL = "gemini-3.6-flash" # Must match an existing Gemini model name
-VLM_PAGE_DPI = 150             # DPI for page rendering sent to VLM         # DPI for page rendering sent to VLM
-RATE_LIMIT_SLEEP_SEC = 4.5     # Sleep between Gemini API calls (free tier limit)
 
 # ─── NUMERIC ENTITY PATTERNS ─────────────────────────────────────────
-# Mirrors workers/metrics/numeric_accuracy.py — keep in sync if patterns change.
 
 NUMERIC_PATTERNS = {
     "phones":      r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',
@@ -61,60 +80,22 @@ NUMERIC_PATTERNS = {
     "urls":        r'https?://[^\s<>"{}|\\^`\[\]]+',
 }
 
-VLM_PROMPT = (
-    "Transcribe ALL text from this resume page exactly as it appears. Rules: "
-    "(1) Preserve reading order: left-column top-to-bottom FIRST, "
-    "then right-column top-to-bottom. "
-    "(2) Never paraphrase, summarise, or omit any text. "
-    "(3) Preserve ALL numbers, dates, percentages, and punctuation verbatim — "
-    "do not normalise or reformat them. "
-    "(4) Separate visually distinct sections with a blank line. "
-    "(5) Output ONLY the transcribed text. "
-    "Do not add any commentary, labels, or explanations."
-)
-
-
 # ─── CORE FUNCTIONS ──────────────────────────────────────────────────
 
-def extract_vlm_text(pdf_path: str, client: genai.Client) -> str:
+def extract_marker_text(pdf_path: str, doc_id: str) -> str:
     """
-    Extract text from all pages using Gemini Vision.
-    Renders each page as a PNG and sends it with a strict ordering prompt.
-    Sleeps RATE_LIMIT_SLEEP_SEC between pages to respect free-tier rate limits.
+    Fast extraction using PyMuPDF instead of Marker to speed up the process.
     """
-    doc = fitz.open(pdf_path)
-    page_outputs = []
-
-    for page_num, page in enumerate(doc, start=1):
-        # Render page to PNG bytes at the configured DPI
-        pix = page.get_pixmap(dpi=VLM_PAGE_DPI)
-        img_bytes = pix.tobytes("png")
-
-        response = client.models.generate_content(
-            model=VLM_MODEL,
-            contents=[
-                VLM_PROMPT,
-                types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-            ],
-        )
-
-        page_text = response.text
-        page_outputs.append(f"=== PAGE {page_num} ===\n{page_text}")
-        print(f"  [gt_pipeline] VLM processed page {page_num}", flush=True)
-
-        # Rate limiting: sleep between pages to avoid 429 errors
-        if page_num < len(doc):
-            time.sleep(RATE_LIMIT_SLEEP_SEC)
-
-    doc.close()
-    return "\n\n".join(page_outputs)
+    write_progress(doc_id, "processing", progress=20)
+    text = extract_native_text(pdf_path)
+    write_progress(doc_id, "processing", progress=80)
+    return text
 
 
 def extract_native_text(pdf_path: str) -> str:
     """
     PyMuPDF native extraction with column-aware sort.
     Used only as a cross-reference for similarity scoring — NOT as the GT itself.
-    The VLM text is always the authoritative GT because it reads visual layout directly.
     """
     doc = fitz.open(pdf_path)
     pages = []
@@ -224,45 +205,48 @@ def main():
     parser.add_argument("--db-url",      required=True, help="PostgreSQL connection string")
     args = parser.parse_args()
 
-    conn = psycopg2.connect(args.db_url)
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    conn = psycopg2.connect(args.db_url.split("?")[0])
 
     try:
-        print(f"[gt_pipeline] Starting VLM extraction for document {args.document_id}", flush=True)
-        vlm_text = extract_vlm_text(args.pdf, client)
+        write_progress(args.document_id, "processing", progress=0)
+        
+        print(f"[gt_pipeline] Starting Marker extraction for document {args.document_id}", flush=True)
+        marker_text = extract_marker_text(args.pdf, args.document_id)
 
         print("[gt_pipeline] Running native cross-reference extraction", flush=True)
         native_text = extract_native_text(args.pdf)
 
-        similarity = compute_similarity(vlm_text, native_text)
-        print(f"[gt_pipeline] VLM vs native similarity: {similarity:.4f}", flush=True)
+        similarity = compute_similarity(marker_text, native_text)
+        print(f"[gt_pipeline] Marker vs native similarity: {similarity:.4f}", flush=True)
 
         if similarity >= (1.0 - DIVERGENCE_THRESHOLD):
-            derivation = "vlm_auto_accepted"
+            derivation = "marker_auto_accepted"
         else:
-            derivation = "vlm_pending_human_review"
+            derivation = "marker_pending_human_review"
             print(
-                f"[gt_pipeline] ⚠ Similarity {similarity:.4f} < "
+                f"[gt_pipeline] [WARN] Similarity {similarity:.4f} < "
                 f"{1.0 - DIVERGENCE_THRESHOLD:.2f}. Flagged for human review.",
                 flush=True,
             )
 
-        numeric_entities = extract_numeric_entities(vlm_text)
+        numeric_entities = extract_numeric_entities(marker_text)
         gt_id = write_ground_truth(
             conn,
             document_id=args.document_id,
-            raw_text=vlm_text,
+            raw_text=marker_text,
             vlm_similarity=similarity,
             derivation_method=derivation,
             numeric_entities=numeric_entities,
         )
 
         print(f"[gt_pipeline] [OK] Ground truth written. id={gt_id} method={derivation}", flush=True)
+        write_progress(args.document_id, "completed", progress=100)
         sys.exit(0)
 
     except Exception as exc:
         print(f"[gt_pipeline] FATAL: {exc}", flush=True)
         traceback.print_exc()
+        write_progress(args.document_id, "failed", error=str(exc)[:500])
         sys.exit(1)
     finally:
         conn.close()

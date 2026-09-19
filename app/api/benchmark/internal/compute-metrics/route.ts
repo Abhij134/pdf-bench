@@ -9,6 +9,10 @@ import { spawn } from 'child_process'
 import path from 'path'
 import { z } from 'zod'
 
+import fs from 'fs'
+const _localVenv = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe')
+const PYTHON_CMD = fs.existsSync(_localVenv) ? _localVenv : (process.platform === 'win32' ? 'python' : 'python3')
+
 const RequestSchema = z.object({ benchmarkRunId: z.string().min(1) })
 
 export async function POST(req: NextRequest) {
@@ -22,13 +26,13 @@ export async function POST(req: NextRequest) {
     const body = RequestSchema.parse(await req.json())
 
     const proc = spawn(
-      'python3',
+      PYTHON_CMD,
       [
-        path.join(process.cwd(), 'workers', 'metric_worker.py'),
+        'metric_worker.py',
         '--benchmark-run-id', body.benchmarkRunId,
         '--db-url',           process.env.DATABASE_URL!,
       ],
-      { env: { ...process.env }, detached: true, stdio: 'ignore', cwd: path.join(process.cwd(), 'workers') }
+      { env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, detached: true, stdio: 'ignore', cwd: path.join(process.cwd(), 'workers') }
     )
     proc.unref()
 

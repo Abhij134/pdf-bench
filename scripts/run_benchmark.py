@@ -10,6 +10,9 @@ Usage:
 """
 import argparse
 import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import time
 import requests
 
@@ -36,9 +39,9 @@ def main():
 
     data = resp.json()
     run_id = data["benchmarkRunId"]
-    print(f"[benchmark] ✓ Run triggered. id={run_id} status={data['status']}")
+    print(f"[benchmark] [OK] Run triggered. id={run_id} status={data['status']}")
     if data.get("failedEngines"):
-        print(f"[benchmark] ⚠ Failed engines: {data['failedEngines']}")
+        print(f"[benchmark] [WARN] Failed engines: {data['failedEngines']}")
 
     # Poll for metric completion (simple polling; replace with websocket in production)
     print("[benchmark] Waiting for metrics to compute (polling every 5s)...")
@@ -62,7 +65,7 @@ def main():
                         f"{(m.get('compositeScore') or 0):.6f}"
                     )
                 sys.exit(0)
-    print("[benchmark] ⚠ Timed out waiting for metrics. Check the database directly.")
+    print("[benchmark] [WARN] Timed out waiting for metrics. Check the database directly.")
     sys.exit(1)
 
 

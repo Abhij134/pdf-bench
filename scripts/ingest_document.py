@@ -14,6 +14,9 @@ Optionally triggers the ground truth pipeline immediately with --trigger-gt.
 """
 import argparse
 import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import requests
 
 
@@ -45,7 +48,7 @@ def main():
 
     data = resp.json()
     doc_id = data["id"]
-    print(f"[ingest] ✓ Document registered. id={doc_id} duplicate={data.get('duplicate', False)}")
+    print(f"[ingest] [OK] Document registered. id={doc_id} duplicate={data.get('duplicate', False)}")
 
     # Optionally trigger ground truth pipeline
     if args.trigger_gt:
@@ -54,9 +57,9 @@ def main():
             json={"documentId": doc_id},
         )
         if gt_resp.status_code == 202:
-            print("[ingest] ✓ Ground truth pipeline triggered (running asynchronously).")
+            print("[ingest] [OK] Ground truth pipeline triggered (running asynchronously).")
         else:
-            print(f"[ingest] ⚠ GT pipeline trigger failed: {gt_resp.status_code} {gt_resp.text}")
+            print(f"[ingest] [WARN] GT pipeline trigger failed: {gt_resp.status_code} {gt_resp.text}")
 
 
 if __name__ == "__main__":

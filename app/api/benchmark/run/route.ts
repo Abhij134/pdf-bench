@@ -24,6 +24,10 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { resolveLocalPath } from '@/lib/storage'
 
+import fs from 'fs'
+const _localVenv = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe')
+const PYTHON_CMD = fs.existsSync(_localVenv) ? _localVenv : (process.platform === 'win32' ? 'python' : 'python3')
+
 const ALL_ENGINES = [
   'PYMUPDF',
   'PDFMINER',
@@ -56,16 +60,16 @@ function runEngineProcess(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(
-      'python3',
+      PYTHON_CMD,
       [
-        path.join(process.cwd(), 'workers', 'engine_runner.py'),
+        'engine_runner.py',
         '--engine',    engine,
         '--pdf',       pdfAbsPath,
         '--result-id', resultId,
         '--db-url',    process.env.DATABASE_URL!,
       ],
       {
-        env: { ...process.env },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         stdio: ['ignore', 'pipe', 'pipe'],
         // Set cwd to workers/ so Python can resolve `engines.*` and `metrics.*`
         // as package imports without needing PYTHONPATH to be set externally.
@@ -81,6 +85,11 @@ function runEngineProcess(
       proc.kill('SIGTERM')
       reject(new Error(`${engine} timed out after ${ENGINE_TIMEOUT_MS}ms`))
     }, ENGINE_TIMEOUT_MS)
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout)
+      reject(new Error(`${engine} failed to spawn: ${err.message}`))
+    })
 
     proc.on('close', (code) => {
       clearTimeout(timeout)
@@ -105,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     if (!doc.groundTruth) {
       return NextResponse.json(
-        { error: 'Ground truth has not been established for this document. Run /api/ground-truth first.' },
+        { error: 'Get Text has not been established for this document. Please click "Get Text" in the Registered Documents table above first.' },
         { status: 422 }
       )
     }
@@ -147,13 +156,21 @@ export async function POST(req: NextRequest) {
           const engine = body.engines[i]
           failedEngines.push(engine)
           const isTimeout = outcome.reason?.message?.includes('timed out')
-          await prisma.extractionResult.update({
+          
+          const existing = await prisma.extractionResult.findUnique({
             where: { id: stubs[i].id },
-            data: {
-              status: isTimeout ? 'TIMEOUT' : 'FAILED',
-              errorMessage: outcome.reason?.message ?? 'Unknown error',
-            },
+            select: { status: true }
           })
+          
+          if (isTimeout || existing?.status === 'PENDING') {
+            await prisma.extractionResult.update({
+              where: { id: stubs[i].id },
+              data: {
+                status: isTimeout ? 'TIMEOUT' : 'FAILED',
+                errorMessage: isTimeout ? outcome.reason?.message : `Process crashed: ${outcome.reason?.message ?? 'Unknown error'}`,
+              },
+            })
+          }
         }
       })
     )
