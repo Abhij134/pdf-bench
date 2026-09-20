@@ -155,8 +155,14 @@ export default function HomePage() {
     if (loadingCompare) {
       setExtractProgress(0)
       interval = setInterval(() => {
-        setExtractProgress(prev => (prev < 90 ? prev + 5 : prev < 98 ? prev + 1 : prev))
-      }, 200)
+        setExtractProgress(prev => {
+          if (prev < 50) return prev + 2
+          if (prev < 80) return prev + 1
+          if (prev < 95) return prev + 0.2
+          if (prev < 98) return prev + 0.05
+          return prev
+        })
+      }, 1000)
     }
     return () => clearInterval(interval)
   }, [loadingCompare])
@@ -1073,7 +1079,7 @@ export default function HomePage() {
                     </>
                   )}
                   <span style={{ position: 'relative', zIndex: 1, textShadow: loadingCompare ? '0 1px 4px rgba(0,0,0,0.5)' : 'none', fontWeight: loadingCompare ? 600 : 500 }}>
-                    {loadingCompare ? `⏳ Extracting (${extractProgress}%)...` : '⚡ Extract Text'}
+                    {loadingCompare ? `⏳ Extracting (${Math.floor(extractProgress)}%)...` : '⚡ Extract Text'}
                   </span>
                 </button>
                 <button

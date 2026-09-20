@@ -15,7 +15,7 @@ const RequestSchema = z.object({
   engine: z.string().min(1),
 })
 
-const ENGINE_TIMEOUT_MS = 120_000
+const ENGINE_TIMEOUT_MS = 600_000 // 10 minutes (to allow for PyTorch model downloads and slow CPU inference)
 
 function runEngineProcess(engine: string, pdfAbsPath: string, resultId: string): Promise<void> {
   return new Promise((resolve, reject) => {
