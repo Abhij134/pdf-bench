@@ -1,0 +1,2 @@
+[build]
+  SECRETS_SCAN_OMIT_PATHS = ".next/,node_modules/"
