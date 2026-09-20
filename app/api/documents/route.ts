@@ -16,6 +16,7 @@
  *   4. Return {id, sha256Hash, filename}.
  */
 import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic';
 import crypto from 'crypto'
 import { spawn } from 'child_process'
 import path from 'path'

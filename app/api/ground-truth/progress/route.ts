@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic';
 import path from 'path'
 import fs from 'fs'
 

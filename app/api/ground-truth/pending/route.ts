@@ -8,6 +8,7 @@
  * native extracted text for side-by-side comparison.
  */
 import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
