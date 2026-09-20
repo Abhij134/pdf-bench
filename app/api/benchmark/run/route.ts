@@ -69,7 +69,7 @@ function runEngineProcess(
         '--db-url',    process.env.DATABASE_URL!,
       ],
       {
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', TORCH_DEVICE: 'cpu', ATTN_IMPLEMENTATION: 'eager' },
         stdio: ['ignore', 'pipe', 'pipe'],
         // Set cwd to workers/ so Python can resolve `engines.*` and `metrics.*`
         // as package imports without needing PYTHONPATH to be set externally.

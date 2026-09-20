@@ -23,7 +23,7 @@ function runEngineProcess(engine: string, pdfAbsPath: string, resultId: string):
       PYTHON_CMD,
       ['engine_runner.py', '--engine', engine, '--pdf', pdfAbsPath, '--result-id', resultId, '--db-url', process.env.DATABASE_URL!],
       {
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', TORCH_DEVICE: 'cpu', ATTN_IMPLEMENTATION: 'eager' },
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: path.join(process.cwd(), 'workers'),
       }

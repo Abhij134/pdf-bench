@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 export default function ApproachesPage() {
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px', paddingTop: '32px' }}>
+    <div className="container" style={{ paddingBottom: '60px', paddingTop: '32px' }}>
       <div style={{ marginBottom: '24px' }}>
         <Link href="/" style={{ color: 'var(--blue)', textDecoration: 'none', fontSize: '0.95rem', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
           ← Back to Dashboard
@@ -131,6 +131,36 @@ export default function ApproachesPage() {
             <li><strong>Persistent Model Caching:</strong> All massive PyTorch models (3GB+) are downloaded directly to your local file system, ensuring subsequent extractions don't require heavy network usage.</li>
             <li><strong>Concurrency Protection (Queuing):</strong> Because loading ML models is highly RAM-intensive, we implemented a sophisticated <code>FileLock</code> queue in the backend. If you batch-process 20 resumes at once via the "Run Benchmark" UI, the system forces the Python worker to process them sequentially one-by-one. This prevents your computer from crashing due to Out-of-Memory (OOM) errors.</li>
           </ul>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '32px' }}>
+        <h2 style={{ marginBottom: '20px', fontSize: '1.25rem', color: 'var(--red)' }}>🚫 Unsupported & Paid Engines (Why they are disabled)</h2>
+        <div style={{ lineHeight: '1.7', color: 'var(--text)' }}>
+          <p style={{ marginBottom: '16px' }}>
+            In the UI, you will notice that certain engines (like Azure, Google Document AI, LlamaParse, etc.) are no longer available in the dropdowns. Here is why they cannot work out-of-the-box and what the "price" is to make them functional:
+          </p>
+
+          <div style={{ marginBottom: '24px' }}>
+            <h3 style={{ marginBottom: '8px', fontSize: '1.1rem' }}>1. Enterprise Cloud APIs (Google, AWS, Azure, Adobe, LlamaParse, Unstructured)</h3>
+            <ul style={{ paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <li><strong>Why they don't work right now:</strong> These are proprietary, commercial SaaS platforms. They require authenticated network requests using private API keys or Service Account credentials which are not included in this open-source repository.</li>
+              <li><strong>Price to make them work:</strong>
+                <ul style={{ paddingLeft: '24px', marginTop: '8px', listStyleType: 'circle' }}>
+                  <li><strong>Time:</strong> You must create developer accounts for each platform, attach a credit card for billing, generate API credentials, and add them to your local <code>.env</code> file. Then, you need to write the specific API client wrapper in <code>workers/engines/</code>.</li>
+                  <li><strong>Money:</strong> While some offer free tiers (e.g., Azure's first 500 pages), using them at scale costs money. <em>(See the Pricing Matrix above for estimates)</em>.</li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 style={{ marginBottom: '8px', fontSize: '1.1rem' }}>2. PDFPlumber</h3>
+            <ul style={{ paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <li><strong>Why it doesn't work right now:</strong> It is a free, native Python library (similar to PyMuPDF and PDFMiner), but it is not currently installed in the Python virtual environment (<code>.venv</code>), nor does it have a written execution script.</li>
+              <li><strong>Price to make it work:</strong> <strong>100% Free</strong>. It only requires running <code>pip install pdfplumber</code> and creating a <code>pdfplumber_engine.py</code> wrapper in the workers folder to route the extraction requests to it.</li>
+            </ul>
+          </div>
         </div>
       </div>
 

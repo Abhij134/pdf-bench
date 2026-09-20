@@ -65,6 +65,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Ground truth or extraction result not found' }, { status: 404 })
     }
 
+    // If the stored result was a fallback (e.g. Marker crashed and used PyMuPDF),
+    // treat it as missing so the frontend re-triggers a fresh real extraction.
+    if (ext.wasFallback) {
+      return NextResponse.json({ error: 'Stored result was a fallback — re-running extraction' }, { status: 404 })
+    }
+
     const groundTruth = gt.rawText || ''
     const extractedText = ext.rawText || ''
 
