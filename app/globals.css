@@ -61,7 +61,6 @@ body {
   color: var(--text);
   min-height: 100vh;
   line-height: 1.6;
-  padding-bottom: 250px !important;
 }
 
 /* ===== LAYOUT ===== */
