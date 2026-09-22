@@ -3,7 +3,9 @@ title: PDF Bench Worker
 emoji: 📄
 colorFrom: blue
 colorTo: indigo
-sdk: docker
+sdk: gradio
+sdk_version: "4.44.0"
+app_file: app.py
 pinned: false
 license: mit
 short_description: Python backend for PDF text extraction benchmarking
@@ -11,7 +13,7 @@ short_description: Python backend for PDF text extraction benchmarking
 
 # PDF Bench Worker
 
-FastAPI backend for the [PDF Benchmarking System](https://pdfbenchmarksystem.netlify.app/).
+FastAPI + Gradio backend for the [PDF Benchmarking System](https://pdfbenchmarksystem.netlify.app/).
 
 This Space runs all Python-heavy tasks:
 - PDF pre-flight classification (page count, layout type, text layer detection)
