@@ -7,6 +7,7 @@
  * Delete a document, its storage file, and associated database records.
  */
 import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma'
 import { deleteFile } from '@/lib/storage'
 

@@ -5,6 +5,7 @@
  * Returns all BenchmarkMetric rows joined to ExtractionResult metadata.
  */
 import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma'
 
 const ENGINE_RATES: Record<string, number> = {
