@@ -9,7 +9,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing documentId' }, { status: 400 })
   }
 
-  const progressDir = path.join(process.cwd(), '.progress')
+  // Use /tmp/.progress on Linux (Netlify/HF), local .progress on Windows (dev)
+  const progressDir = process.platform === 'win32'
+    ? path.join(process.cwd(), '.progress')
+    : '/tmp/.progress'
   const filePath = path.join(progressDir, `${documentId}.json`)
 
   try {

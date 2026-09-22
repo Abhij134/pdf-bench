@@ -43,7 +43,11 @@ from filelock import FileLock  # type: ignore
 
 def write_progress(doc_id: str, status: str, progress: int = 0, error: str = None):
     try:
-        progress_dir = os.path.join(os.path.dirname(__file__), "..", ".progress")
+        # Use /tmp on Linux (HF Spaces), relative .progress dir locally
+        if os.name == 'nt':
+            progress_dir = os.path.join(os.path.dirname(__file__), "..", ".progress")
+        else:
+            progress_dir = "/tmp/.progress"
         os.makedirs(progress_dir, exist_ok=True)
         file_path = os.path.join(progress_dir, f"{doc_id}.json")
         data = {
@@ -61,9 +65,11 @@ load_dotenv(env_path)
 
 # ─── CONFIGURATION ───────────────────────────────────────────────────
 
-os.environ["HF_HOME"] = r"P:\huggingface_models_cache"
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-os.environ["IN_STREAMLIT"] = "true"
+# Only set HF_HOME if not already configured (avoids overwriting HF Space defaults)
+if not os.environ.get("HF_HOME"):
+    os.environ["HF_HOME"] = os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ.setdefault("IN_STREAMLIT", "true")
 
 DIVERGENCE_THRESHOLD = 0.15    # Flag for human review if similarity < 0.85
 

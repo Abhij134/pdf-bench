@@ -52,6 +52,40 @@ const RequestSchema = z.object({
 
 const ENGINE_TIMEOUT_MS = 120_000  // 2 minutes per engine
 
+/** Call HF backend to run one extraction engine. Falls back to spawn in local dev. */
+async function runEngine(
+  engine: ExtractionEngine,
+  pdfAbsPath: string,
+  pdfBuffer: Buffer | null,
+  resultId: string,
+): Promise<void> {
+  const hfUrl = process.env.HF_BACKEND_URL
+  const secret = process.env.WORKER_SECRET ?? ''
+
+  if (hfUrl && pdfBuffer) {
+    // Production: POST to HF Space — fire and forget (it writes DB directly)
+    const res = await fetch(`${hfUrl}/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-worker-secret': secret },
+      body: JSON.stringify({
+        result_id: resultId,
+        engine,
+        pdf_b64: pdfBuffer.toString('base64'),
+        db_url: process.env.DATABASE_URL!,
+      }),
+      signal: AbortSignal.timeout(ENGINE_TIMEOUT_MS),
+    })
+    if (!res.ok) {
+      throw new Error(`HF extract failed for ${engine}: ${res.status} ${await res.text()}`)
+    }
+    // HF returns 202 immediately — the extraction runs async on the HF side
+    // We poll the DB for status in the frontend
+  } else {
+    // Local dev: spawn Python child process
+    return runEngineProcess(engine, pdfAbsPath, resultId)
+  }
+}
+
 /** Spawn a Python engine worker and return a Promise that resolves/rejects on process exit. */
 function runEngineProcess(
   engine: ExtractionEngine,
@@ -71,13 +105,10 @@ function runEngineProcess(
       {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8', TORCH_DEVICE: 'cpu', ATTN_IMPLEMENTATION: 'eager' },
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Set cwd to workers/ so Python can resolve `engines.*` and `metrics.*`
-        // as package imports without needing PYTHONPATH to be set externally.
         cwd: path.join(process.cwd(), 'workers'),
       }
     )
 
-    // Log stdout/stderr to server console for debugging
     proc.stdout?.on('data', (d: Buffer) => console.log(`[${engine}]`, d.toString().trim()))
     proc.stderr?.on('data', (d: Buffer) => console.error(`[${engine}]`, d.toString().trim()))
 
@@ -119,7 +150,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const pdfAbsPath = resolveLocalPath(doc.originalStoragePath)
+    // Read PDF into buffer for HF backend; resolve local path for local dev
+    const pdfAbsPath = process.env.HF_BACKEND_URL ? '' : resolveLocalPath(doc.originalStoragePath)
+    let pdfBuffer: Buffer | null = null
+    if (process.env.HF_BACKEND_URL) {
+      const { getFile } = await import('@/lib/storage')
+      pdfBuffer = await getFile(doc.originalStoragePath)
+    }
 
     // 2. Create BenchmarkRun
     const benchmarkRun = await prisma.benchmarkRun.create({
@@ -143,7 +180,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Fire all engines concurrently
     const tasks = stubs.map((stub: { id: string; engine: ExtractionEngine }) =>
-      runEngineProcess(stub.engine, pdfAbsPath, stub.id)
+      runEngine(stub.engine, pdfAbsPath, pdfBuffer, stub.id)
     )
 
     const outcomes = await Promise.allSettled(tasks)
@@ -195,17 +232,34 @@ export async function POST(req: NextRequest) {
   }
 }
 
+
 async function triggerMetricComputation(benchmarkRunId: string): Promise<void> {
-  const url = `${process.env.INTERNAL_WORKER_URL}/api/benchmark/internal/compute-metrics`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-worker-secret': process.env.WORKER_SECRET ?? '',
-    },
-    body: JSON.stringify({ benchmarkRunId }),
-  })
-  if (!res.ok) {
-    throw new Error(`Metric trigger failed: ${res.status} ${await res.text()}`)
+  const hfUrl = process.env.HF_BACKEND_URL
+  const secret = process.env.WORKER_SECRET ?? ''
+
+  if (hfUrl) {
+    // Production: call HF Space metrics endpoint
+    const res = await fetch(`${hfUrl}/metrics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-worker-secret': secret },
+      body: JSON.stringify({
+        benchmark_run_id: benchmarkRunId,
+        db_url: process.env.DATABASE_URL!,
+      }),
+    })
+    if (!res.ok) {
+      throw new Error(`HF metrics trigger failed: ${res.status} ${await res.text()}`)
+    }
+  } else {
+    // Local dev: call internal Next.js endpoint which spawns metric_worker.py
+    const url = `${process.env.INTERNAL_WORKER_URL ?? 'http://localhost:3000'}/api/benchmark/internal/compute-metrics`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-worker-secret': secret },
+      body: JSON.stringify({ benchmarkRunId }),
+    })
+    if (!res.ok) {
+      throw new Error(`Metric trigger failed: ${res.status} ${await res.text()}`)
+    }
   }
 }

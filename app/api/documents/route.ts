@@ -105,9 +105,10 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Spawn pre-flight classifier in background — non-blocking.
-    // Classifies pdfType, layoutType, hasTextLayer, etc. and updates the DB row.
-    spawnPreflight(doc.id, resolveLocalPath(storageKey))
+    // Call HF backend for pre-flight classification (non-blocking)
+    callHfPreflight(doc.id, buffer).catch((err) =>
+      console.error('[POST /api/documents] Preflight error:', err)
+    )
 
     return NextResponse.json({ id: doc.id, sha256Hash, filename: doc.filename }, { status: 201 })
 
@@ -117,14 +118,40 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function spawnPreflight(documentId: string, pdfAbsPath: string): void {
+async function callHfPreflight(documentId: string, pdfBuffer: Buffer): Promise<void> {
+  const hfUrl = process.env.HF_BACKEND_URL
+  const dbUrl = process.env.DATABASE_URL!
+  const secret = process.env.WORKER_SECRET ?? ''
+
+  if (hfUrl) {
+    // Production: call Hugging Face Space
+    const res = await fetch(`${hfUrl}/preflight`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-worker-secret': secret },
+      body: JSON.stringify({
+        document_id: documentId,
+        pdf_b64: pdfBuffer.toString('base64'),
+        db_url: dbUrl,
+      }),
+    })
+    if (!res.ok) {
+      throw new Error(`HF preflight failed: ${res.status} ${await res.text()}`)
+    }
+    console.log(`[preflight] HF Space called for document ${documentId}`)
+  } else {
+    // Local dev: spawn Python child process
+    spawnPreflight(documentId, resolveLocalPath(`documents/${documentId.split('/').pop()}`), dbUrl)
+  }
+}
+
+function spawnPreflight(documentId: string, pdfAbsPath: string, dbUrl: string): void {
   const proc = spawn(
     PYTHON_CMD,
     [
       'preflight.py',
       '--document-id', documentId,
       '--pdf',         pdfAbsPath,
-      '--db-url',      process.env.DATABASE_URL!,
+      '--db-url',      dbUrl,
     ],
     {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
@@ -141,6 +168,6 @@ function spawnPreflight(documentId: string, pdfAbsPath: string): void {
     console.error(`[preflight] Failed to spawn for document ${documentId}:`, err)
   })
 
-  proc.unref()  // Don't hold the Node.js event loop open
+  proc.unref()
   console.log(`[preflight] Spawned for document ${documentId}`)
 }
