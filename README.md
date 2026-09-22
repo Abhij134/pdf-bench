@@ -40,7 +40,7 @@ npm install
 
 ### 2. Install Python dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r python-requirements.txt
 # GPU only (optional — enables Marker engine):
 # pip install -r requirements-gpu.txt
 ```

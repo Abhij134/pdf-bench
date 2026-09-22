@@ -1,5 +1,5 @@
 # Install this file ONLY when a CUDA GPU is available.
 # Adds Marker (layout-aware open-source OCR) and PyTorch.
-# Install after requirements.txt: pip install -r requirements-gpu.txt
+# Install after python-requirements.txt: pip install -r requirements-gpu.txt
 marker-pdf==0.2.14
 torch==2.3.0
