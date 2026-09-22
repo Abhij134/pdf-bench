@@ -10,7 +10,7 @@ import fs from 'fs'
 import path from 'path'
 
 const DRIVER = process.env.STORAGE_DRIVER ?? 'local'
-const LOCAL_ROOT = process.env.LOCAL_STORAGE_PATH ?? './storage'
+const LOCAL_ROOT = process.env.LOCAL_STORAGE_PATH ?? (process.env.NETLIFY ? '/tmp/storage' : './storage')
 
 /**
  * Save a Buffer to storage. Returns the storage key.
